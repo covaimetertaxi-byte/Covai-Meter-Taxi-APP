@@ -1,0 +1,8 @@
+{
+  "name": "Covai Meter Taxi",
+  "description": "Taxi Meter for Covai Meter Taxi with real-time GPS tracking, background mode, and PDF receipts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

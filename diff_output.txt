@@ -1,0 +1,393 @@
+--- app/src/main/java/com/covaimetertaxi/driver/service/TaxiMeterService.kt	2026-09-17 23:31:58.669725431 +0000
++++ user_pasted_code.kt	2026-09-18 00:19:59.484773230 +0000
+@@ -1,4 +1,4 @@
+-package com.covaimetertaxi.driver.service
++package com.trustyyellowcab.driver.service
+ 
+ import android.annotation.SuppressLint
+ import android.app.Notification
+@@ -62,8 +62,8 @@
+ import androidx.savedstate.SavedStateRegistryController
+ import androidx.savedstate.SavedStateRegistryOwner
+ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+-import com.covaimetertaxi.driver.MainActivity
+-import com.covaimetertaxi.driver.util.GeocoderHelper
++import com.trustyyellowcab.driver.MainActivity
++import com.trustyyellowcab.driver.util.GeocoderHelper
+ import kotlinx.coroutines.*
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.asStateFlow
+@@ -92,11 +92,11 @@
+     val speedKmH: Double = 0.0,
+     
+     // Settings applied
+-    val baseFare: Double = 0.0,
+-    val perKmFare: Double = 0.0,
+-    val waitingChargePerMin: Double = 0.0,
+-    val minimumFare: Double = 0.0,
+-    val nightChargePercent: Double = 0.0,
++    val baseFare: Double = 50.0,
++    val perKmFare: Double = 15.0,
++    val waitingChargePerMin: Double = 0.50,
++    val minimumFare: Double = 198.0,
++    val nightChargePercent: Double = 10.0,
+     val isNightMode: Boolean = false,
+     
+     // Package meter fields
+@@ -185,7 +185,6 @@
+     private val distanceEngine = DistanceEngine()
+     private val waitingDetector = WaitingDetector()
+     private var currentIntervalMillis = 1000L
+-    private var continuousStationarySeconds = 0L
+ 
+     private var lastSmoothedLat: Double? = null
+     private var lastSmoothedLng: Double? = null
+@@ -242,7 +241,7 @@
+     }
+ 
+     companion object {
+-        private const val CHANNEL_ID = "CovaiMeterTaxiChannel"
++        private const val CHANNEL_ID = "TrustyYellowCabChannel"
+         private const val NOTIFICATION_ID = 1011
+ 
+         private val _tripState = MutableStateFlow(LiveTripState())
+@@ -324,11 +323,11 @@
+                 waitingSeconds = prefs.getLong("waitingSeconds", 0L),
+                 currentFare = prefs.getFloat("currentFare", 0f).toDouble(),
+                 speedKmH = prefs.getFloat("speedKmH", 0f).toDouble(),
+-                baseFare = prefs.getFloat("baseFare", 0f).toDouble(),
+-                perKmFare = prefs.getFloat("perKmFare", 0f).toDouble(),
+-                waitingChargePerMin = prefs.getFloat("waitingChargePerMin", 0f).toDouble(),
+-                minimumFare = prefs.getFloat("minimumFare", 0f).toDouble(),
+-                nightChargePercent = prefs.getFloat("nightChargePercent", 0f).toDouble(),
++                baseFare = prefs.getFloat("baseFare", 50f).toDouble(),
++                perKmFare = prefs.getFloat("perKmFare", 15f).toDouble(),
++                waitingChargePerMin = prefs.getFloat("waitingChargePerMin", 0.5f).toDouble(),
++                minimumFare = prefs.getFloat("minimumFare", 198f).toDouble(),
++                nightChargePercent = prefs.getFloat("nightChargePercent", 10f).toDouble(),
+                 isNightMode = prefs.getBoolean("isNightMode", false),
+                 isPackageMeter = prefs.getBoolean("isPackageMeter", false),
+                 packageName = prefs.getString("packageName", "") ?: "",
+@@ -428,10 +427,10 @@
+                 vehicleNumber = vehicleNumber,
+                 vehicleCategory = category,
+                 vehicleModel = model,
+-                startTime = com.covaimetertaxi.driver.util.NetworkTimeHelper.getCurrentTimeMillis(),
++                startTime = com.trustyyellowcab.driver.util.NetworkTimeHelper.getCurrentTimeMillis(),
+                 baseFare = baseFare,
+                 perKmFare = perKmFare,
+-                waitingChargePerMin = if (isPackageMeter) 0.0 else (if (waitingCharge > 0.0) waitingCharge else 1.0),
++                waitingChargePerMin = waitingCharge,
+                 minimumFare = minFare,
+                 nightChargePercent = nightPercent,
+                 isNightMode = isNightMode,
+@@ -735,7 +734,6 @@
+         when (action) {
+             "START_TRIP" -> {
+                 synchronized(recentLocations) { recentLocations.clear() }
+-                continuousStationarySeconds = 0L
+                 lastLocation = null
+                 saveLastValidLocation(this, null)
+                 startLocationGeocoded = false
+@@ -756,7 +754,6 @@
+             }
+             "PAUSE_TRIP" -> {
+                 synchronized(recentLocations) { recentLocations.clear() }
+-                continuousStationarySeconds = 0L
+                 updateNotification()
+             }
+             "RESUME_TRIP" -> {
+@@ -936,20 +933,9 @@
+ 
+                     // Standby Waiting Charge accumulation:
+                     // Only calculate standby waiting charge when stationary. If running, do not calculate.
+-                    // If vehicle stops, only start calculating waiting time after 1 minute (60 seconds) of stopping.
+                     val isWaiting = checkIfStationary()
+ 
+-                    if (isWaiting) {
+-                        continuousStationarySeconds += 1
+-                    } else {
+-                        continuousStationarySeconds = 0L
+-                    }
+-
+-                    val updatedWait = if (isWaiting && continuousStationarySeconds > 60L) {
+-                        currentState.waitingSeconds + 1
+-                    } else {
+-                        currentState.waitingSeconds
+-                    }
++                    val updatedWait = if (isWaiting) currentState.waitingSeconds + 1 else currentState.waitingSeconds
+ 
+                     val newState = currentState.copy(
+                         durationSeconds = updatedDur,
+@@ -1027,7 +1013,7 @@
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+             val channel = NotificationChannel(
+                 CHANNEL_ID,
+-                "Covai Meter Taxi SERVICE",
++                "TRUSTY YELLOW CAB SERVICE",
+                 NotificationManager.IMPORTANCE_LOW
+             ).apply {
+                 description = "Active Taxi Trip Status Tracking"
+@@ -1065,10 +1051,10 @@
+         )
+ 
+         return NotificationCompat.Builder(this, CHANNEL_ID)
+-            .setContentTitle("Covai Meter Taxi")
++            .setContentTitle("Trusty Yellow Cab")
+             .setContentText(contentText)
+             .setSubText(subText)
+-            .setSmallIcon(com.covaimetertaxi.driver.R.mipmap.ic_launcher)
++            .setSmallIcon(com.trustyyellowcab.driver.R.mipmap.ic_launcher)
+             .setContentIntent(pendingIntent)
+             .setColor(0xFFE60000.toInt())
+             .setOngoing(state.status == TripStatus.RUNNING || state.status == TripStatus.PAUSED)
+@@ -1168,7 +1154,7 @@
+             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+             wakeLock = powerManager.newWakeLock(
+                 PowerManager.PARTIAL_WAKE_LOCK,
+-                "CovaiMeterTaxi::TaxiMeterWakeLock"
++                "TrustyYellowCab::TaxiMeterWakeLock"
+             ).apply {
+                 acquire()
+             }
+@@ -1237,240 +1223,3 @@
+ 
+     override fun onBind(intent: Intent?): IBinder? = null
+ }
+-
+-@Composable
+-fun FloatingMeterContent(
+-    liveState: LiveTripState,
+-    onClose: () -> Unit,
+-    onAppOpen: () -> Unit,
+-    onDrag: (Int, Int) -> Unit
+-) {
+-    val animatedSpeed by animateFloatAsState(
+-        targetValue = liveState.speedKmH.toFloat(),
+-        animationSpec = spring(stiffness = Spring.StiffnessLow),
+-        label = "speedAnimation"
+-    )
+-
+-    val animatedFare by animateFloatAsState(
+-        targetValue = liveState.currentFare.toFloat(),
+-        animationSpec = spring(stiffness = Spring.StiffnessLow),
+-        label = "fareAnimation"
+-    )
+-
+-    val gpsColor = when (liveState.gpsSignalStatus) {
+-        "EXCELLENT" -> Color(0xFF4CAF50)
+-        "GOOD" -> Color(0xFF81C784)
+-        "POOR" -> Color(0xFFFF9800)
+-        else -> Color(0xFFE57373)
+-    }
+-
+-    Card(
+-        colors = CardDefaults.cardColors(
+-            containerColor = Color(0xFF12141C), // Deep premium dark slate
+-            contentColor = Color.White
+-        ),
+-        shape = RoundedCornerShape(18.dp),
+-        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+-        modifier = Modifier
+-            .width(215.dp)
+-            .border(
+-                width = 1.dp,
+-                color = Color(0x22FFFFFF), // Subtle bright premium borders
+-                shape = RoundedCornerShape(18.dp)
+-            )
+-            .pointerInput(Unit) {
+-                detectDragGestures { change, dragAmount ->
+-                    change.consume()
+-                    onDrag(dragAmount.x.toInt(), dragAmount.y.toInt())
+-                }
+-            }
+-    ) {
+-        Column(
+-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+-            horizontalAlignment = Alignment.CenterHorizontally
+-        ) {
+-            // Drag Handle Pill at the very top to guide the user intuitively
+-            Box(
+-                modifier = Modifier
+-                    .width(36.dp)
+-                    .height(4.dp)
+-                    .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(100))
+-            )
+-
+-            Spacer(modifier = Modifier.height(8.dp))
+-
+-            // Header Bar
+-            Row(
+-                modifier = Modifier.fillMaxWidth(),
+-                horizontalArrangement = Arrangement.SpaceBetween,
+-                verticalAlignment = Alignment.CenterVertically
+-            ) {
+-                // Sleek, refined Open App Button
+-                IconButton(
+-                    onClick = onAppOpen,
+-                    modifier = Modifier
+-                        .size(34.dp)
+-                        .background(Color(0xFF2E7D32).copy(alpha = 0.15f), shape = RoundedCornerShape(50))
+-                        .border(width = 1.dp, color = Color(0x334CAF50), shape = RoundedCornerShape(50))
+-                ) {
+-                    Icon(
+-                        imageVector = Icons.Default.Launch,
+-                        contentDescription = "Open App",
+-                        tint = Color(0xFF81C784),
+-                        modifier = Modifier.size(16.dp)
+-                    )
+-                }
+-
+-                // Styled center text and status badge
+-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+-                    Text(
+-                        text = "COVAI TAXI",
+-                        fontSize = 10.sp,
+-                        fontWeight = FontWeight.Black,
+-                        color = Color(0xFFFFB300), // Taxi Yellow
+-                        letterSpacing = 0.5.sp
+-                    )
+-                    Text(
+-                        text = if (liveState.isPackageMeter) "PACKAGE" else "REGULAR",
+-                        fontSize = 8.sp,
+-                        fontWeight = FontWeight.Bold,
+-                        color = Color(0xFF94A3B8)
+-                    )
+-                }
+-
+-                // Sleek, refined Close Button
+-                IconButton(
+-                    onClick = onClose,
+-                    modifier = Modifier
+-                        .size(34.dp)
+-                        .background(Color(0xFFC62828).copy(alpha = 0.15f), shape = RoundedCornerShape(50))
+-                        .border(width = 1.dp, color = Color(0x33EF5350), shape = RoundedCornerShape(50))
+-                ) {
+-                    Icon(
+-                        imageVector = Icons.Default.Close,
+-                        contentDescription = "Close Overlay",
+-                        tint = Color(0xFFE57373),
+-                        modifier = Modifier.size(16.dp)
+-                    )
+-                }
+-            }
+-
+-            Spacer(modifier = Modifier.height(8.dp))
+-
+-            // Modern digital speed HUD
+-            Row(
+-                verticalAlignment = Alignment.Bottom,
+-                horizontalArrangement = Arrangement.Center
+-            ) {
+-                Text(
+-                    text = "${animatedSpeed.toInt()}",
+-                    fontSize = 32.sp,
+-                    fontWeight = FontWeight.Black,
+-                    color = Color(0xFFFFB300), // Taxi Yellow
+-                    letterSpacing = (-0.5).sp
+-                )
+-                Spacer(modifier = Modifier.width(4.dp))
+-                Text(
+-                    text = "KM/H",
+-                    fontSize = 10.sp,
+-                    fontWeight = FontWeight.Black,
+-                    color = Color(0xFF94A3B8),
+-                    modifier = Modifier.padding(bottom = 6.dp)
+-                )
+-            }
+-
+-            Spacer(modifier = Modifier.height(4.dp))
+-
+-            // Interactive animated fare row
+-            Row(
+-                horizontalArrangement = Arrangement.Center,
+-                verticalAlignment = Alignment.CenterVertically,
+-                modifier = Modifier.fillMaxWidth()
+-            ) {
+-                Text(
+-                    text = "₹",
+-                    fontSize = 14.sp,
+-                    fontWeight = FontWeight.Bold,
+-                    color = Color(0xFF4CAF50)
+-                )
+-                Spacer(modifier = Modifier.width(2.dp))
+-                Text(
+-                    text = String.format(Locale.US, "%.2f", animatedFare),
+-                    fontSize = 20.sp,
+-                    fontWeight = FontWeight.Black,
+-                    color = Color(0xFF4CAF50),
+-                    letterSpacing = (-0.5).sp
+-                )
+-            }
+-
+-            Spacer(modifier = Modifier.height(8.dp))
+-
+-            // Subtle divider line
+-            Box(
+-                modifier = Modifier
+-                    .fillMaxWidth()
+-                    .height(1.dp)
+-                    .background(Color(0x12FFFFFF))
+-            )
+-
+-            Spacer(modifier = Modifier.height(8.dp))
+-
+-            // Grid displaying real-time distance and duration
+-            Row(
+-                modifier = Modifier.fillMaxWidth(),
+-                horizontalArrangement = Arrangement.SpaceEvenly
+-            ) {
+-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+-                    Text(
+-                        text = "DISTANCE",
+-                        fontSize = 8.sp,
+-                        fontWeight = FontWeight.Bold,
+-                        color = Color(0xFF94A3B8),
+-                        letterSpacing = 0.5.sp
+-                    )
+-                    Spacer(modifier = Modifier.height(2.dp))
+-                    Text(
+-                        text = String.format(Locale.US, "%.2f km", liveState.distanceKm),
+-                        fontSize = 11.sp,
+-                        fontWeight = FontWeight.ExtraBold,
+-                        color = Color.White
+-                    )
+-                }
+-
+-                Box(
+-                    modifier = Modifier
+-                        .width(1.dp)
+-                        .height(22.dp)
+-                        .background(Color(0x12FFFFFF))
+-                )
+-
+-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+-                    Text(
+-                        text = "DURATION",
+-                        fontSize = 8.sp,
+-                        fontWeight = FontWeight.Bold,
+-                        color = Color(0xFF94A3B8),
+-                        letterSpacing = 0.5.sp
+-                    )
+-                    Spacer(modifier = Modifier.height(2.dp))
+-                    
+-                    val h = liveState.durationSeconds / 3600
+-                    val m = (liveState.durationSeconds % 3600) / 60
+-                    val s = liveState.durationSeconds % 60
+-                    val timeStr = if (h > 0) {
+-                        String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
+-                    } else {
+-                        String.format(Locale.US, "%02d:%02d", m, s)
+-                    }
+-                    
+-                    Text(
+-                        text = timeStr,
+-                        fontSize = 11.sp,
+-                        fontWeight = FontWeight.ExtraBold,
+-                        color = Color.White
+-                    )
+-                }
+-            }
+-        }
+-    }
+-}
